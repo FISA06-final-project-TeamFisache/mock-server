@@ -1,15 +1,15 @@
-# Mock Payment Producer
+# Mock Transaction Producer
 
-마이데이터 표준 API(v251001) 카드-008(국내 승인내역) 규격 기반의 더미 결제 이벤트를 Kafka로 발행하는 mock 프로듀서입니다.
+`transactions` 테이블 스키마에 맞춘 더미 거래 이벤트를 Kafka로 발행하는 mock 프로듀서입니다.
 
-- Topic: `card-approval-events`
+- Topic: `transaction-events`
 - 발행 주기: 2초에 1건
-- 메시지 Key: `card_id` (파티셔닝 순서 보장용)
+- 메시지 Key: `user_id` (같은 사용자 거래는 같은 파티션으로 → 순서 보장)
 
 ## 사전 준비
 
 - Kafka 브로커가 떠 있어야 합니다 (기본값은 호스트의 `localhost:9092`).
-- 토픽 `card-approval-events`는 자동 생성되도록 Kafka 설정이 되어 있거나, 미리 만들어 두세요.
+- 토픽 `transaction-events`는 자동 생성되도록 Kafka 설정이 되어 있거나, 미리 만들어 두세요.
 
 ---
 
@@ -102,19 +102,31 @@ KAFKA_BOOTSTRAP=other-host:9092 python mock_payment.py
 
 ---
 
-## 메시지 스펙 (카드-008 발췌)
+## 메시지 스펙
+
+`transactions` 테이블 스키마와 1:1 매칭됩니다.
+
+| 필드 | 타입 (DB) | 설명 | NULL |
+|---|---|---|---|
+| `id` | UUID | 거래 PK | NOT NULL |
+| `user_id` | UUID | 사용자 ID (10개 풀에서 랜덤) | NOT NULL |
+| `asset_id` | UUID | 자산 ID (20개 풀에서 랜덤) | NOT NULL |
+| `amount` | BIGINT | 거래 금액 (1,000 ~ 500,000) | NULL 가능 |
+| `category` | VARCHAR(50) | 카테고리 (식비, 교통, 쇼핑 등) | NULL 가능 |
+| `sender_name` | VARCHAR(100) | 가맹점/송신자명 | NULL 가능 |
+| `transactionAt` | LocalDateTime | 거래 일시 (ISO-8601, 초 단위) | NOT NULL |
+
+**샘플 페이로드**
 
 ```json
 {
-  "card_id": "CARD" + 28자리 영숫자,
-  "approved_dtime": "YYYYMMDDHHMMSS",
-  "approved_num": "15자리 숫자",
-  "approved_amt": 1000.0 ~ 500000.0,
-  "approved_type": "01(일시불) | 02(할부) | 03 | 04",
-  "merchant_name": "가맹점명",
-  "merchant_regno": "XXX-XX-XXXXX",
-  "is_canceled": false,
-  "installment_term": 3 | 6 | 12   // approved_type=02 일 때만 포함
+  "id": "3f1c2a9b-0d4e-4f7a-8b21-5c9e6d1a2b3c",
+  "user_id": "a2b3c4d5-e6f7-4890-1234-56789abcdef0",
+  "asset_id": "11111111-2222-3333-4444-555555555555",
+  "amount": 12500,
+  "category": "식비",
+  "sender_name": "스타벅스 코리아",
+  "transactionAt": "2026-05-14T12:34:56"
 }
 ```
 
