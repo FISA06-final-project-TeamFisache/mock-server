@@ -60,6 +60,11 @@ KAFKA_BOOTSTRAP=other-host:9092 python mock_payment.py
 | 이름 | 설명 | 기본값 |
 |---|---|---|
 | `KAFKA_BOOTSTRAP` | Kafka 브로커 주소 | 로컬 실행: `localhost:9092` / 도커 실행: `host.docker.internal:9092` |
+| `DB_HOST` | PostgreSQL 호스트 | 로컬 실행: `localhost` / 도커 실행: `host.docker.internal` |
+| `DB_PORT` | PostgreSQL 포트 | `5432` |
+| `DB_NAME` | DB 이름 | `wooriport` |
+| `DB_USER` | DB 사용자 | `wooriport` |
+| `DB_PASSWORD` | DB 비밀번호 | `wooriport1234` |
 
 ---
 
@@ -67,7 +72,7 @@ KAFKA_BOOTSTRAP=other-host:9092 python mock_payment.py
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
-| `asset_number` | String | 카드번호 형식 `XXXX-XXXX-XXXX-XXXX` (20개 풀에서 랜덤) |
+| `asset_number` | String | 카드번호 (DB `assets` 테이블의 `asset_type='CREDIT_CARD'` 자산에서 랜덤 선택) |
 | `amount` | Long | 거래 금액 (1,000 ~ 500,000) |
 | `category` | String | 카테고리 (식비, 교통, 쇼핑 등) |
 | `sender_name` | String | 가맹점/송신자명 |
