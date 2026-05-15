@@ -8,50 +8,11 @@
 
 ## 사전 준비
 
-- Kafka 브로커가 떠 있어야 합니다 (기본값은 호스트의 `localhost:9092`).
-- 토픽 `transaction-events`는 자동 생성되도록 Kafka 설정이 되어 있거나, 미리 만들어 두세요.
+- 인프라 폴더에서 clone 후 인프라 컨테이너를 실행시켜 주세요.
 
 ---
 
-## 1. Docker로 실행 (권장)
-
-### 빌드
-
-```bash
-docker build -t mock-payment .
-```
-
-### 실행
-
-**Windows / macOS (Docker Desktop)**
-
-```bash
-docker run --rm mock-payment
-```
-
-기본값으로 `host.docker.internal:9092`를 바라봅니다. 호스트 머신에 떠 있는 Kafka에 그대로 연결됩니다.
-
-**Linux**
-
-`host.docker.internal`이 기본 지원되지 않으므로 옵션을 하나 추가합니다.
-
-```bash
-docker run --rm --add-host=host.docker.internal:host-gateway mock-payment
-```
-
-**다른 Kafka 주소로 보내고 싶을 때**
-
-```bash
-docker run --rm -e KAFKA_BOOTSTRAP=other-host:9092 mock-payment
-```
-
-### 중지
-
-`Ctrl + C`
-
----
-
-## 2. 로컬(venv)로 실행
+## 1. 로컬(venv)로 실행
 
 ### 가상환경 생성 및 의존성 설치
 
@@ -126,11 +87,3 @@ KAFKA_BOOTSTRAP=other-host:9092 python mock_payment.py
 
 ---
 
-## Troubleshooting
-
-**컨테이너에서 Kafka 접속이 안 됩니다 (`Connection refused` 등)**
-
-호스트 Kafka의 `advertised.listeners`가 `localhost:9092`로만 잡혀 있으면 컨테이너 안에서 접속이 깨집니다. 다음 중 하나를 시도하세요.
-
-- Kafka 설정에 `PLAINTEXT://host.docker.internal:9092`를 advertised listener로 추가
-- Kafka도 같은 docker network로 묶어 컨테이너 이름으로 접속
