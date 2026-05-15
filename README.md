@@ -4,7 +4,7 @@
 
 - Topic: `transaction-events`
 - 발행 주기: 2초에 1건
-- 메시지 Key: `user_id` (같은 사용자 거래는 같은 파티션으로 → 순서 보장)
+- 메시지 Key: `asset_number` (같은 카드 거래는 같은 파티션으로 → 순서 보장)
 
 ## 사전 준비
 
@@ -104,25 +104,19 @@ KAFKA_BOOTSTRAP=other-host:9092 python mock_payment.py
 
 ## 메시지 스펙
 
-`transactions` 테이블 스키마와 1:1 매칭됩니다.
-
-| 필드 | 타입 (DB) | 설명 | NULL |
-|---|---|---|---|
-| `id` | UUID | 거래 PK | NOT NULL |
-| `user_id` | UUID | 사용자 ID (10개 풀에서 랜덤) | NOT NULL |
-| `asset_id` | UUID | 자산 ID (20개 풀에서 랜덤) | NOT NULL |
-| `amount` | BIGINT | 거래 금액 (1,000 ~ 500,000) | NULL 가능 |
-| `category` | VARCHAR(50) | 카테고리 (식비, 교통, 쇼핑 등) | NULL 가능 |
-| `sender_name` | VARCHAR(100) | 가맹점/송신자명 | NULL 가능 |
-| `transactionAt` | LocalDateTime | 거래 일시 (ISO-8601, 초 단위) | NOT NULL |
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `asset_number` | String | 카드번호 형식 `XXXX-XXXX-XXXX-XXXX` (20개 풀에서 랜덤) |
+| `amount` | Long | 거래 금액 (1,000 ~ 500,000) |
+| `category` | String | 카테고리 (식비, 교통, 쇼핑 등) |
+| `sender_name` | String | 가맹점/송신자명 |
+| `transactionAt` | LocalDateTime | 거래 일시 (ISO-8601, 초 단위) |
 
 **샘플 페이로드**
 
 ```json
 {
-  "id": "3f1c2a9b-0d4e-4f7a-8b21-5c9e6d1a2b3c",
-  "user_id": "a2b3c4d5-e6f7-4890-1234-56789abcdef0",
-  "asset_id": "11111111-2222-3333-4444-555555555555",
+  "asset_number": "5429-4494-5284-1827",
   "amount": 12500,
   "category": "식비",
   "sender_name": "스타벅스 코리아",

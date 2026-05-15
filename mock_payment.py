@@ -2,7 +2,6 @@ import json
 import os
 import random
 import time
-import uuid
 from datetime import datetime
 from confluent_kafka import Producer
 
@@ -14,9 +13,12 @@ def delivery_report(err, msg):
     if err is not None:
         print(f"❌ 전송 실패: {err}")
 
-# 같은 사용자/자산이 여러 번 거래하도록 풀에서 뽑아 사용
-USER_IDS = [str(uuid.uuid4()) for _ in range(10)]
-ASSET_IDS = [str(uuid.uuid4()) for _ in range(20)]
+def generate_asset_number():
+    """카드번호 형식 생성: 4자리-4자리-4자리-4자리"""
+    return "-".join(f"{random.randint(0, 9999):04d}" for _ in range(4))
+
+# 같은 카드가 여러 번 거래하도록 풀에서 뽑아 사용
+ASSET_NUMBERS = [generate_asset_number() for _ in range(20)]
 
 CATEGORIES = [
     "식비", "교통", "쇼핑", "카페", "문화/여가",
@@ -29,20 +31,18 @@ SENDER_NAMES = [
 ]
 
 def generate_transaction():
-    """transactions 테이블 스키마에 맞춘 거래 데이터 생성"""
+    """카프카 적재용 거래 데이터 생성"""
     return {
-        "id": str(uuid.uuid4()),                                # UUID, NOT NULL
-        "user_id": random.choice(USER_IDS),                     # UUID, NOT NULL
-        "asset_id": random.choice(ASSET_IDS),                   # UUID, NOT NULL
-        "amount": random.randint(1000, 500000),                 # BIGINT
-        "category": random.choice(CATEGORIES),                  # VARCHAR(50)
-        "sender_name": random.choice(SENDER_NAMES),             # VARCHAR(100)
+        "asset_number": random.choice(ASSET_NUMBERS),                   # 카드번호 (XXXX-XXXX-XXXX-XXXX)
+        "amount": random.randint(1000, 500000),                         # BIGINT
+        "category": random.choice(CATEGORIES),                          # VARCHAR(50)
+        "sender_name": random.choice(SENDER_NAMES),                     # VARCHAR(100)
         "transactionAt": datetime.now().isoformat(timespec='seconds'),  # LocalDateTime
     }
 
 topic_name = "transaction-events"
 
-print(f"🚀 거래(transactions) 데이터 생성을 시작합니다... (Topic: {topic_name})")
+print(f"🚀 거래 데이터 생성을 시작합니다... (Topic: {topic_name})")
 print("중지하려면 Ctrl+C를 누르세요.")
 
 try:
@@ -51,7 +51,7 @@ try:
 
         producer.produce(
             topic_name,
-            key=data['user_id'],  # 같은 사용자의 거래는 같은 파티션 → 순서 보장
+            key=data['asset_number'],  # 같은 카드 거래는 같은 파티션 → 순서 보장
             value=json.dumps(data).encode('utf-8'),
             callback=delivery_report
         )
@@ -59,7 +59,7 @@ try:
         producer.flush()
 
         # 터미널 확인용 출력 (부하 테스트 시 주석 처리)
-        print(f"전송: {data['sender_name']} | {data['amount']}원 | {data['category']}")
+        print(f"전송: {data['sender_name']} | {data['amount']}원 | {data['category']} | {data['asset_number']}")
 
         time.sleep(2.0)
 
