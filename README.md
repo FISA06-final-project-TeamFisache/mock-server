@@ -1,4 +1,8 @@
-# Mock Transaction Producer
+# Mock Server (Python)
+
+> 실행 순서: **인프라 → 백엔드 → AI서버 → 목서버**
+>
+> 인프라(Docker)와 백엔드가 먼저 실행된 상태여야 합니다.
 
 `transactions` 테이블 스키마에 맞춘 더미 거래 이벤트를 Kafka로 발행하는 mock 프로듀서입니다.
 

@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY mock_payment.py .
 
 ENV PYTHONUNBUFFERED=1
-ENV KAFKA_BOOTSTRAP=host.docker.internal:9092
+ENV KAFKA_BOOTSTRAP=localhost:9092
 ENV DB_HOST=host.docker.internal
 ENV DB_PORT=5432
 ENV DB_NAME=wooriport
