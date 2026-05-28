@@ -42,6 +42,12 @@ pip install -r requirements.txt
 python mock_payment.py
 ```
 
+AgentService 용 mock FastAPI (`/portfolio/profile`, `/portfolio/rebalance`, `/asset-portfolio`) 는 별도 프로세스로:
+
+```bash
+uvicorn mock_asset_portfolio:app --host 0.0.0.0 --port 8000 --reload
+```
+
 기본 Kafka 주소는 `localhost:9092` 입니다. 다른 주소로 보내려면 환경변수로 지정하세요.
 
 **Windows (PowerShell)**
