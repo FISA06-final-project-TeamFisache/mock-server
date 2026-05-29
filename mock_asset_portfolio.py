@@ -1,9 +1,9 @@
 """
 Mock FastAPI — Spring AgentService 가 호출하는 3개 엔드포인트 흉내
 
-  POST /portfolio/profile   ← AgentService.generateProfile  (PortiSurvey 화면)
-  POST /portfolio/rebalance ← AgentService.recommend        (AssetPrescription 화면)
-  POST /asset-portfolio     ← AgentService.generatePrescriptions (PrescriptionComplete 화면)
+  POST /portfolio/profile         ← AgentService.generateProfile  (PortiSurvey 화면)
+  POST /portfolio/rebalance       ← AgentService.recommend        (AssetPrescription 화면)
+  POST /portfolio/asset-portfolio ← AgentService.generatePrescriptions (PrescriptionComplete 화면)
 
 실행:
     cd mock-server
@@ -40,7 +40,7 @@ async def portfolio_profile(req: Request):
 
 # ──────────────────────────────────────────────────────────────
 # POST /portfolio/rebalance  ← AgentService.recommend
-# 응답: { invest_amount: int, salary_rebalance: [{asset_number, category, ratio}] }
+# 응답: { invest_amount: int, salary_rebalance: [{asset_id, category, ratio}] }
 #   ratio = salary 대비 % (백엔드가 amount = salary * ratio / 100 계산)
 # ──────────────────────────────────────────────────────────────
 @app.post("/portfolio/rebalance")
@@ -53,37 +53,41 @@ async def portfolio_rebalance(req: Request):
     print("\n[mock /portfolio/rebalance] user_id={} salary={} fixed={} assets={}".format(
         body.get("user_id"), salary, fixed, len(assets)))
 
-    # asset_number 추출 (백엔드가 asset_number 로 매핑함)
     def find_first(types):
         for a in assets:
             if a.get("asset_type") in types:
-                return a.get("asset_number")
+                return a.get("asset_id")
         return None
 
-    checking_num = find_first(["CHECKING"])
-    parking_num  = find_first(["PARKING", "CMA"])
-    saving_num   = find_first(["SAVINGS", "DEPOSIT"])
-    stock_num    = find_first(["STOCK"])
-    irp_num      = find_first(["IRP"])
+    checking_id = find_first(["CHECKING"])
+    parking_id  = find_first(["PARKING", "CMA"])
+    saving_id   = find_first(["SAVINGS", "DEPOSIT"])
+    stock_id    = find_first(["STOCK"])
+    irp_id      = find_first(["IRP"])
 
-    # 월급 분배 비율 (총합 약 70%, 나머지 30% = 변동지출)
+    # plans = 비투자 이체 (생활비/비상금/적금) — 합 45%
+    # invest_amount = 투자 총액 (ETF/IRP) — 보유 자산에 따라 0~25%
+    # 남은 약 30% = 변동지출 여유분
     plans = []
-    if checking_num: plans.append({"asset_number": checking_num, "category": "생활비",   "ratio": 25})
-    if parking_num:  plans.append({"asset_number": parking_num,  "category": "비상금",   "ratio": 10})
-    if saving_num:   plans.append({"asset_number": saving_num,   "category": "적금",     "ratio": 10})
-    if stock_num:    plans.append({"asset_number": stock_num,    "category": "ETF",      "ratio": 15})
-    if irp_num:      plans.append({"asset_number": irp_num,      "category": "IRP",      "ratio": 10})
+    if checking_id: plans.append({"asset_id": checking_id, "category": "생활비", "ratio": 25})
+    if parking_id:  plans.append({"asset_id": parking_id,  "category": "비상금", "ratio": 10})
+    if saving_id:   plans.append({"asset_id": saving_id,   "category": "적금",   "ratio": 10})
 
-    print(f"  → salary_rebalance {len(plans)}건: {[(p['category'], p['asset_number']) for p in plans]}")
+    invest_ratio = 0
+    if stock_id: invest_ratio += 15
+    if irp_id:   invest_ratio += 10
+    invest_amount = salary * invest_ratio // 100
+
+    print(f"  → salary_rebalance {len(plans)}건: {[(p['category'], p['asset_id']) for p in plans]}, invest={invest_amount}")
 
     return {
-        "invest_amount": int(salary * 0.31),   # 약 31% 투자
+        "invest_amount": invest_amount,
         "salary_rebalance": plans,
     }
 
 
 # ──────────────────────────────────────────────────────────────
-# POST /asset-portfolio  ← AgentService.generatePrescriptions
+# POST /portfolio/asset-portfolio  ← AgentService.generatePrescriptions
 # 응답: { created_at, investment_flows: [{title, term, summary, funding_sources, gathering_account, portfolio}] }
 # ──────────────────────────────────────────────────────────────
 def _group(items, key):
@@ -113,7 +117,7 @@ def _build_portfolio(products_by_type, type_ratio_pairs):
     return chosen
 
 
-@app.post("/asset-portfolio", status_code=201)
+@app.post("/portfolio/asset-portfolio", status_code=201)
 async def asset_portfolio(req: Request):
     body = await req.json()
     print("\n[mock /asset-portfolio]")
