@@ -138,70 +138,110 @@ async def asset_portfolio(req: Request):
     for t in ("CHECKING", "PARKING", "CMA", "SAVINGS", "DEPOSIT"):
         cash_pool.extend(by_type.get(t) or [])
 
-    flows = []
+    # 1단계: 흐름 후보를 모아 weight 만 기록 — 실제 amount 는 나중에 정규화
+    # gathering / funding 둘 다 풀이 비면 cash_pool 전체로 폴백 → mock 은 항상 3개 생성 시도
+    candidates = []
 
-    # 단기 ─ 비상금
-    g1 = _pick_gathering(by_type, ["PARKING", "CMA", "CHECKING"])
+    def pick_funding(gathering_asset, max_n):
+        if gathering_asset is None:
+            return cash_pool[:max_n]
+        f = [c for c in cash_pool if c["asset_id"] != gathering_asset["asset_id"]][:max_n]
+        return f or [gathering_asset]   # 다른 게 없으면 gathering 자신을 funding 으로 재사용
+
+    g1 = _pick_gathering(by_type, ["PARKING", "CMA", "CHECKING", "SAVINGS", "DEPOSIT", "ISA", "IRP"])
     if g1:
-        funding = [c for c in cash_pool if c["asset_id"] != g1["asset_id"]][:2]
-        if not funding:
-            funding = [g1]
-        amt_each = max(int(invest_amount * 0.3 / max(len(funding), 1)), 100000)
-        flows.append({
+        candidates.append({
+            "weight": 30,
             "title": "비상금·생활비 베이스",
             "term": "단기",
             "summary": "예상 못한 지출에 흔들리지 않게 든든히 준비해요",
-            "funding_sources": [
-                {"asset_id": f["asset_id"], "amount": amt_each} for f in funding
+            "gathering": g1,
+            "funding": pick_funding(g1, 2),
+            "portfolio_specs": [
+                [("SAVING", 60), ("DEPOSIT", 40)],
+                [("DEPOSIT", 100)],
+                [("SAVING", 100)],
             ],
-            "gathering_account": g1["asset_id"],
-            "portfolio": _build_portfolio(products_by_type, [
-                ("SAVING", 60), ("DEPOSIT", 40),
-            ]) or _build_portfolio(products_by_type, [("DEPOSIT", 100)])
-              or _build_portfolio(products_by_type, [("SAVING", 100)]),
         })
 
-    # 중기 ─ ISA / 채권+주식
-    g2 = _pick_gathering(by_type, ["ISA", "CHECKING", "CMA"])
+    g2 = _pick_gathering(by_type, ["ISA", "CMA", "CHECKING", "SAVINGS", "DEPOSIT", "PARKING", "IRP"])
     if g2:
-        funding = [c for c in cash_pool if c["asset_id"] != g2["asset_id"]][:1]
-        if funding:
-            amt = max(int(invest_amount * 0.4), 100000)
-            flows.append({
-                "title": "중기 목표 자산",
-                "term": "중기",
-                "summary": "3~5년 목표를 안정적으로 키워가요",
-                "funding_sources": [
-                    {"asset_id": f["asset_id"], "amount": amt} for f in funding
-                ],
-                "gathering_account": g2["asset_id"],
-                "portfolio": _build_portfolio(products_by_type, [
-                    ("BOND", 55), ("STOCK", 45),
-                ]) or _build_portfolio(products_by_type, [("BOND", 100)])
-                  or _build_portfolio(products_by_type, [("STOCK", 100)]),
-            })
+        candidates.append({
+            "weight": 40,
+            "title": "중기 목표 자산",
+            "term": "중기",
+            "summary": "3~5년 목표를 안정적으로 키워가요",
+            "gathering": g2,
+            "funding": pick_funding(g2, 1),
+            "portfolio_specs": [
+                [("BOND", 55), ("STOCK", 45)],
+                [("BOND", 100)],
+                [("STOCK", 100)],
+            ],
+        })
 
-    # 장기 ─ IRP / 주식+IRP
-    g3 = _pick_gathering(by_type, ["IRP", "ISA", "CHECKING"])
+    g3 = _pick_gathering(by_type, ["IRP", "ISA", "CHECKING", "CMA", "PARKING", "SAVINGS", "DEPOSIT"])
     if g3:
-        funding = [c for c in cash_pool if c["asset_id"] != g3["asset_id"]][:1]
-        if funding:
-            amt = max(int(invest_amount * 0.3), 100000)
-            flows.append({
-                "title": "은퇴·연금 장기 자산",
-                "term": "장기",
-                "summary": "세제혜택을 살려 길게 굴려요",
-                "funding_sources": [
-                    {"asset_id": f["asset_id"], "amount": amt} for f in funding
-                ],
-                "gathering_account": g3["asset_id"],
-                "portfolio": _build_portfolio(products_by_type, [
-                    ("STOCK", 70), ("IRP", 30),
-                ]) or _build_portfolio(products_by_type, [("STOCK", 100)])
-                  or _build_portfolio(products_by_type, [("IRP", 100)]),
-            })
+        candidates.append({
+            "weight": 30,
+            "title": "은퇴·연금 장기 자산",
+            "term": "장기",
+            "summary": "세제혜택을 살려 길게 굴려요",
+            "gathering": g3,
+            "funding": pick_funding(g3, 1),
+            "portfolio_specs": [
+                [("STOCK", 70), ("IRP", 30)],
+                [("STOCK", 100)],
+                [("IRP", 100)],
+            ],
+        })
 
-    print(f"  → investment_flows {len(flows)}건 생성")
+    # 단+장 만 있는 경우 단:장 = 6:4 로 분배 (중기 없을 때 단기 비중을 키움)
+    terms_present = {c["term"] for c in candidates}
+    if terms_present == {"단기", "장기"}:
+        for c in candidates:
+            c["weight"] = 60 if c["term"] == "단기" else 40
+
+    # 2단계: invest_amount 를 weight 비율로 분배 (합이 정확히 invest_amount 가 되도록)
+    flows = []
+    total_weight = sum(c["weight"] for c in candidates)
+    allocated = 0
+    for i, c in enumerate(candidates):
+        if i == len(candidates) - 1:
+            # 마지막 흐름은 잔액 — 반올림 오차 흡수
+            flow_amount = invest_amount - allocated
+        else:
+            flow_amount = invest_amount * c["weight"] // total_weight if total_weight else 0
+            allocated += flow_amount
+
+        # funding_sources — 통장 잔액 기반의 초기 자본 (월 납입금액과 별개)
+        #   각 통장 balance 의 50% 를 끌어와 초기 자본으로 넣는 가정 (최소 10만원)
+        funding_sources = []
+        for f in c["funding"]:
+            bal = int(f.get("balance") or 0)
+            amt = max(bal // 2, 100000)
+            funding_sources.append({"asset_id": f["asset_id"], "amount": amt})
+
+        portfolio = None
+        for spec in c["portfolio_specs"]:
+            portfolio = _build_portfolio(products_by_type, spec)
+            if portfolio:
+                break
+
+        flows.append({
+            "title": c["title"],
+            "term": c["term"],
+            "summary": c["summary"],
+            "funding_sources": funding_sources,
+            "gathering_account": c["gathering"]["asset_id"],
+            "amount": flow_amount,
+            "portfolio": portfolio or [],
+        })
+
+    print(f"  → investment_flows {len(flows)}건 생성, 월납입 합 = {sum(f['amount'] for f in flows)} / invest_amount={invest_amount}")
+    for f in flows:
+        funding_sum = sum(fs['amount'] for fs in f['funding_sources'])
+        print(f"     [{f['term']}] 월납입={f['amount']:,}, 끌어오기 합={funding_sum:,}")
     return {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "investment_flows": flows,
