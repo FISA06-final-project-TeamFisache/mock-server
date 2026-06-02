@@ -16,6 +16,17 @@ from fastapi import FastAPI, Request
 
 app = FastAPI()
 
+# 백엔드가 요청에 products 를 안 보내므로, 응답 portfolio[].name 매핑이 되도록
+# seed_1_mydata.sql 의 products.name 과 정확히 일치하는 기본 상품 카탈로그를 둔다.
+DEFAULT_PRODUCTS = [
+    {"product_type": "DEPOSIT", "name": "WON 정기예금"},
+    {"product_type": "SAVING",  "name": "26주 적금"},
+    {"product_type": "SAVING",  "name": "토스 자유적금"},
+    {"product_type": "STOCK",   "name": "TIGER 미국S&P500"},
+    {"product_type": "STOCK",   "name": "KODEX 나스닥100"},
+    {"product_type": "IRP",     "name": "미래에셋 TDF2045"},
+]
+
 
 @app.get("/")
 async def health():
@@ -88,7 +99,7 @@ async def portfolio_rebalance(req: Request):
 
 # ──────────────────────────────────────────────────────────────
 # POST /portfolio/asset-portfolio  ← AgentService.generatePrescriptions
-# 응답: { created_at, investment_flows: [{title, term, summary, funding_sources, gathering_account, portfolio}] }
+# 응답: { created_at, investment_flows: [{title, term, summary, funding_sources, gathering_id, portfolio}] }
 # ──────────────────────────────────────────────────────────────
 def _group(items, key):
     out = {}
@@ -129,7 +140,9 @@ async def asset_portfolio(req: Request):
 
     invest_amount = int(body.get("invest_amount") or 0)
     invest_assets = body.get("invest_assets") or []
-    products = body.get("products") or []
+    # 백엔드는 더 이상 요청에 products 를 보내지 않고, 응답 portfolio[].name 을
+    # DB products.name 으로 매핑한다. → 시드된 상품명과 일치하는 기본 카탈로그로 폴백.
+    products = body.get("products") or DEFAULT_PRODUCTS
 
     by_type = _group(invest_assets, "asset_type")
     products_by_type = _group(products, "product_type")
@@ -233,7 +246,9 @@ async def asset_portfolio(req: Request):
             "term": c["term"],
             "summary": c["summary"],
             "funding_sources": funding_sources,
-            "gathering_account": c["gathering"]["asset_id"],
+            # 보유 계좌를 모으기 통장으로 연결 → 백엔드는 gathering_id(문자열)로 읽음.
+            # (gathering_account 는 '계좌 추천' 시 {name,type,institution,interest_rate} 객체용)
+            "gathering_id": c["gathering"]["asset_id"],
             "amount": flow_amount,
             "portfolio": portfolio or [],
         })
