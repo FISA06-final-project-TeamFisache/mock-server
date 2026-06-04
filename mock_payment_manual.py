@@ -25,6 +25,8 @@ BAR_SENDERS   = ["을지로호프", "연남동주점", "이태원와인바"]    
 TAXI_SENDERS  = ["카카오택시", "온다택시", "리본택시"]                # 택시
 NIGHT_SENDERS = DELIVERY_SENDERS + ["맥도날드", "롯데리아", "GS25", "CU편의점"]   # 야식
 LUNCH_SENDERS = ["맥도날드", "롯데리아", "버거킹", "본죽"] + DELIVERY_SENDERS     # 점심
+SHOPPING_SENDERS = ["올리브영", "무신사", "29CM", "지그재그",         # 쇼핑 (온라인·패션·뷰티)
+                    "에이블리", "나이키", "자라"]
 
 # ── 미니챌린지 템플릿 (백엔드 분류 기준과 맞춤) ──────────
 #   senders=None → 해당 category 의 전체 가맹점에서 랜덤
@@ -35,7 +37,7 @@ CHALLENGE_TEMPLATES = [
     {"name": "술",   "desc": "식비·호프/주점/바",   "category": "식비", "senders": BAR_SENDERS,      "window": None},
     {"name": "야식", "desc": "식비·23:00~04:00",    "category": "식비", "senders": NIGHT_SENDERS,    "window": (23, 4)},
     {"name": "점심", "desc": "식비·11:00~14:00",    "category": "식비", "senders": LUNCH_SENDERS,    "window": (11, 14)},
-    {"name": "쇼핑", "desc": "쇼핑",                "category": "쇼핑", "senders": None,             "window": None},
+    {"name": "쇼핑", "desc": "쇼핑·온라인/패션/뷰티", "category": "쇼핑", "senders": SHOPPING_SENDERS, "window": None},
     {"name": "택시", "desc": "교통·택시",           "category": "교통", "senders": TAXI_SENDERS,     "window": None},
 ]
 
