@@ -36,11 +36,25 @@ if not ASSET_NUMBERS:
     raise RuntimeError("CREDIT_CARD 자산이 없어 거래 데이터를 생성할 수 없습니다.")
 print(f"💳 CREDIT_CARD {len(ASSET_NUMBERS)}건 로드 완료")
 
+# 미니챌린지 감지를 위한 sender 키워드 (백엔드 분류 기준과 맞춤)
+#   커피      = category '카페'
+#   배달      = category '식비' & sender in DELIVERY_SENDERS (우아한형제들/요기요/쿠팡이츠)
+#   술        = category '식비' & sender 키워드 '바'/'주점'/'호프'
+#   야식      = category '식비' & 시간대 23:00~04:00            (※ transactionAt 시간 필요)
+#   점심      = category '식비' & 시간대 11:00~14:00            (※ transactionAt 시간 필요)
+#   쇼핑      = category '쇼핑'
+#   택시      = category '교통' & sender 키워드 '택시'
+DELIVERY_SENDERS = ["(주)우아한형제들", "요기요", "쿠팡이츠"]
+
 # 카테고리 → 가맹점 매핑. 가맹점은 반드시 해당 카테고리에서만 뽑힘.
 CATEGORY_SENDERS = {
-    "식비":     ["맥도날드", "롯데리아", "버거킹", "(주)우아한형제들", "GS25", "CU편의점", "이마트24", "본죽"],
-    "교통":     ["코레일", "서울교통공사", "카카오모빌리티", "티머니", "제주항공", "대한항공"],
-    "쇼핑":     ["쿠팡(주)", "이마트", "롯데마트", "홈플러스", "올리브영", "무신사", "11번가"],
+    "식비":     ["맥도날드", "롯데리아", "버거킹", "GS25", "CU편의점", "이마트24", "본죽",
+                "(주)우아한형제들", "요기요", "쿠팡이츠",          # 배달 챌린지
+                "을지로호프", "연남동주점", "이태원와인바"],       # 술 챌린지 (호프/주점/바)
+    "교통":     ["코레일", "서울교통공사", "카카오모빌리티", "티머니", "제주항공", "대한항공",
+                "카카오택시", "온다택시", "리본택시"],            # 택시 챌린지
+    "쇼핑":     ["쿠팡(주)", "이마트", "롯데마트", "홈플러스", "올리브영", "무신사", "11번가",
+                "29CM", "지그재그", "에이블리"],
     "카페":     ["스타벅스 코리아", "투썸플레이스", "이디야커피", "빽다방", "메가MGC커피", "할리스"],
     "문화/여가": ["CGV", "롯데시네마", "교보문고", "카카오게임즈"],
     "의료":     ["서울아산병원", "세브란스병원", "올리브영약국", "GC녹십자약국", "강남성심병원"],
@@ -60,6 +74,11 @@ SENDER_AMOUNT = {
     "롯데리아":             (4000,   18000),
     "버거킹":               (6000,   25000),
     "(주)우아한형제들":     (12000,  60000),
+    "요기요":               (12000,  50000),  # 배달
+    "쿠팡이츠":             (12000,  50000),  # 배달
+    "을지로호프":           (15000,  80000),  # 술
+    "연남동주점":           (20000, 100000),  # 술
+    "이태원와인바":         (20000,  90000),  # 술
     "GS25":                 (1000,   15000),
     "CU편의점":             (1000,   15000),
     "이마트24":             (1000,   20000),
@@ -68,6 +87,9 @@ SENDER_AMOUNT = {
     "서울교통공사":         (1400,    1400),  # 기본 요금 고정
     "카카오모빌리티":       (3800,   30000),
     "티머니":               (1400,    5000),
+    "카카오택시":           (3800,   30000),  # 택시
+    "온다택시":             (3800,   30000),  # 택시
+    "리본택시":             (3800,   28000),  # 택시
     "제주항공":             (50000, 200000),
     "대한항공":             (80000, 500000),
     "쿠팡(주)":             (10000, 300000),
@@ -77,6 +99,9 @@ SENDER_AMOUNT = {
     "올리브영":             (10000,  80000),
     "무신사":               (20000, 200000),
     "11번가":               (10000, 200000),
+    "29CM":                 (15000, 150000),
+    "지그재그":             (10000, 100000),
+    "에이블리":             (10000,  80000),
     "스타벅스 코리아":      (4500,   15000),
     "투썸플레이스":         (4000,   14000),
     "이디야커피":           (3000,   10000),
@@ -174,26 +199,26 @@ def generate_transaction():
 
 topic_name = "transaction-events"
 
-print(f"🚀 거래 데이터 생성을 시작합니다... (Topic: {topic_name})")
-print("중지하려면 Ctrl+C를 누르세요.")
 
-try:
-    while True:
-        data = generate_transaction()
+def send_transaction(data: dict):
+    """단일 거래를 카프카로 전송 (수동 전송 스크립트에서도 재사용)."""
+    producer.produce(
+        topic_name,
+        key=data['asset_number'],  # 같은 카드 거래는 같은 파티션 → 순서 보장
+        value=json.dumps(data).encode('utf-8'),
+        callback=delivery_report,
+    )
+    producer.flush()
+    print(f"전송: {data['sender_name']} | {data['amount']}원 | {data['category']} | {data['transactionAt']} | {data['asset_number']}")
 
-        producer.produce(
-            topic_name,
-            key=data['asset_number'],  # 같은 카드 거래는 같은 파티션 → 순서 보장
-            value=json.dumps(data).encode('utf-8'),
-            callback=delivery_report
-        )
 
-        producer.flush()
+if __name__ == "__main__":
+    print(f"🚀 거래 데이터 생성을 시작합니다... (Topic: {topic_name})")
+    print("중지하려면 Ctrl+C를 누르세요.")
 
-        # 터미널 확인용 출력 (부하 테스트 시 주석 처리)
-        print(f"전송: {data['sender_name']} | {data['amount']}원 | {data['category']} | {data['asset_number']}")
-
-        time.sleep(2.0)
-
-except KeyboardInterrupt:
-    print("\n🛑 데이터 생성을 중지합니다.")
+    try:
+        while True:
+            send_transaction(generate_transaction())
+            time.sleep(2.0)
+    except KeyboardInterrupt:
+        print("\n🛑 데이터 생성을 중지합니다.")
