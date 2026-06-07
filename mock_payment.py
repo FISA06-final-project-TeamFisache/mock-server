@@ -2,11 +2,18 @@ import argparse
 import json
 import os
 import random
+import sys
 import time
 import uuid
 from datetime import datetime
 from confluent_kafka import Producer
 import psycopg2
+
+# Windows 콘솔(cp949)에서도 이모지/한글 print 가 깨지지 않도록 stdout 을 UTF-8 로 고정
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 # 카프카 설정 (도커 컨테이너에서는 host.docker.internal로 호스트의 Kafka에 접근)
 conf = {'bootstrap.servers': os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")}
