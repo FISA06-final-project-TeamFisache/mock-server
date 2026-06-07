@@ -1,7 +1,9 @@
+import argparse
 import json
 import os
 import random
 import time
+import uuid
 from datetime import datetime
 from confluent_kafka import Producer
 import psycopg2
@@ -201,35 +203,81 @@ def generate_transaction():
     amount = int(base_amount * multiplier)
 
     return {
+        "event_id": str(uuid.uuid4()),                                  # PG 거래고유번호 = 멱등키
         "asset_number": asset_number,                                   # 카드번호 (XXXX-XXXX-XXXX-XXXX)
         "amount": amount,                                               # BIGINT
         "category": category,                                           # VARCHAR(50)
         "sender_name": sender_name,                                     # VARCHAR(100)
         "transactionAt": datetime.now().isoformat(timespec='seconds'),  # LocalDateTime
+        "producedAt": int(time.time() * 1000),                          # 발행 epoch ms (E2E 지연 측정)
     }
 
 topic_name = "transaction-events"
 
 
-def send_transaction(data: dict):
+def _produce(data: dict):
+    """카프카 produce 1건. 내부 큐가 가득 차면 poll 로 비우고 재시도."""
+    payload = json.dumps(data).encode('utf-8')
+    while True:
+        try:
+            producer.produce(
+                topic_name,
+                key=data['asset_number'],  # 같은 카드 거래는 같은 파티션 → 순서 보장
+                value=payload,
+                callback=delivery_report,
+            )
+            return
+        except BufferError:
+            producer.poll(0.1)  # 큐 비울 때까지 콜백 처리 후 재시도
+
+
+def send_transaction(data: dict, flush: bool = True, verbose: bool = True):
     """단일 거래를 카프카로 전송 (수동 전송 스크립트에서도 재사용)."""
-    producer.produce(
-        topic_name,
-        key=data['asset_number'],  # 같은 카드 거래는 같은 파티션 → 순서 보장
-        value=json.dumps(data).encode('utf-8'),
-        callback=delivery_report,
-    )
-    producer.flush()
-    print(f"전송: {data['sender_name']} | {data['amount']}원 | {data['category']} | {data['transactionAt']} | {data['asset_number']}")
+    _produce(data)
+    if flush:
+        producer.flush()
+    if verbose:
+        print(f"전송: {data['sender_name']} | {data['amount']}원 | {data['category']} | {data['transactionAt']} | {data['asset_number']}")
 
 
-if __name__ == "__main__":
-    print(f"🚀 거래 데이터 생성을 시작합니다... (Topic: {topic_name})")
+def run_burst(count: int):
+    """count 건을 sleep 없이 최대속도로 발행 (성능 측정용). 끝에 flush 1회."""
+    print(f"🚀 버스트 모드: {count}건 발행 시작 (Topic: {topic_name})")
+    start = time.time()
+    for i in range(count):
+        _produce(generate_transaction())
+        if i % 5000 == 0:
+            producer.poll(0)            # 콜백 주기적 처리
+            print(f"  produce {i}/{count}")
+    producer.flush()                    # 전량 전송 보장
+    elapsed = time.time() - start
+    rate = count / elapsed if elapsed > 0 else 0
+    print(f"✅ 발행 완료: {count}건 / {elapsed:.2f}s / {rate:,.0f} msg/s (produce 기준)")
+
+
+def run_continuous(rate: float):
+    """rate 건/초로 지속 발행 (기존 동작). rate<=0 이면 최대속도."""
+    print(f"🚀 거래 데이터 생성을 시작합니다... (Topic: {topic_name}, rate={rate}/s)")
     print("중지하려면 Ctrl+C를 누르세요.")
-
+    interval = 1.0 / rate if rate > 0 else 0
     try:
         while True:
             send_transaction(generate_transaction())
-            time.sleep(2.0)
+            if interval:
+                time.sleep(interval)
     except KeyboardInterrupt:
         print("\n🛑 데이터 생성을 중지합니다.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="transaction-events 발행기")
+    parser.add_argument("--count", type=int, default=0,
+                        help="발행할 총 건수. 0이면 지속 발행 모드(기존 동작)")
+    parser.add_argument("--rate", type=float, default=0.5,
+                        help="지속 발행 모드 초당 건수. 0이면 최대속도. (--count 지정 시 무시)")
+    args = parser.parse_args()
+
+    if args.count > 0:
+        run_burst(args.count)
+    else:
+        run_continuous(args.rate)
