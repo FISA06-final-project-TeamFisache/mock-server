@@ -34,6 +34,70 @@ async def health():
 
 
 # ──────────────────────────────────────────────────────────────
+# 미니챌린지 — Spring ChallengeAgentService 가 호출
+#   POST /mini_challenge         ← recommend  body: {user_id, category_expense[], stock_themes[]}
+#   POST /mini_challenge/adjust  ← adjust     body: {user_id, feedback}
+# 응답: ChallengeProposalResponseDto
+#   {created_at, title, description, category, challenge_sub_type, challenge_type,
+#    target, estimated_saving, ticker}
+#   challenge_sub_type ∈ COFFEE/DELIVERY/ALCOHOL/LATE_NIGHT/LUNCH/SHOPPING/TAXI
+#   challenge_type     ∈ AMOUNT/COUNT
+# ──────────────────────────────────────────────────────────────
+def _proposal(title, description, category, sub_type, ctype, target, saving, ticker):
+    return {
+        "created_at": datetime.now().isoformat(),
+        "title": title,
+        "description": description,
+        "category": category,
+        "challenge_sub_type": sub_type,
+        "challenge_type": ctype,
+        "target": target,
+        "estimated_saving": saving,
+        "ticker": ticker,
+    }
+
+
+@app.post("/mini_challenge")
+async def mini_challenge(req: Request):
+    body = await req.json()
+    print("\n[mock /mini_challenge] user_id={} themes={}".format(
+        body.get("user_id"), body.get("stock_themes")))
+    return _proposal(
+        "커피 3잔만 마시기", "이번주 카페 지출을 줄여 절약 습관을 만들어봐요!",
+        "카페", "COFFEE", "COUNT", 3, 24000, "삼성전자",
+    )
+
+
+@app.post("/mini_challenge/adjust")
+async def mini_challenge_adjust(req: Request):
+    body = await req.json()
+    feedback = body.get("feedback") or ""
+    print("\n[mock /mini_challenge/adjust] user_id={} feedback={}".format(
+        body.get("user_id"), feedback))
+
+    if "쉽게" in feedback:
+        return _proposal(
+            "커피 5잔까지 OK", "조금 여유있게! 이번주 커피 5잔 이내로 도전해요.",
+            "카페", "COFFEE", "COUNT", 5, 14000, "삼성전자",
+        )
+    if "어렵게" in feedback:
+        return _proposal(
+            "커피 2잔만 마시기", "독하게! 이번주 커피는 딱 2잔까지만.",
+            "카페", "COFFEE", "COUNT", 2, 35000, "삼성전자",
+        )
+    if "주제" in feedback:
+        return _proposal(
+            "배달 음식 2번만 시키기", "주제를 바꿔봤어요. 이번주 배달은 2번까지!",
+            "식비", "DELIVERY", "COUNT", 2, 48000, "카카오",
+        )
+    # 그 외 피드백 → 기본 제안
+    return _proposal(
+        "커피 3잔만 마시기", "이번주 카페 지출을 줄여 절약 습관을 만들어봐요!",
+        "카페", "COFFEE", "COUNT", 3, 24000, "삼성전자",
+    )
+
+
+# ──────────────────────────────────────────────────────────────
 # POST /portfolio/profile  ← AgentService.generateProfile
 # 응답: { expense_comment, invest_comment, savings_comment }
 # ──────────────────────────────────────────────────────────────
