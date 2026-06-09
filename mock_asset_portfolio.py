@@ -143,17 +143,28 @@ async def portfolio_rebalance(req: Request):
     # plans = 비투자 이체 (생활비/비상금/적금) — 합 45%
     # invest_amount = 투자 총액 (ETF/IRP) — 보유 자산에 따라 0~25%
     # 남은 약 30% = 변동지출 여유분
-    plans = []
-    if checking_id: plans.append({"asset_id": checking_id, "category": "생활비", "ratio": 25})
-    if parking_id:  plans.append({"asset_id": parking_id,  "category": "비상금", "ratio": 10})
-    if saving_id:   plans.append({"asset_id": saving_id,   "category": "적금",   "ratio": 10})
+    # 백엔드는 각 plan 에서 amount(원)·account_purpose(→nickname)·comment 를 직접 읽음
+    plan_specs = []
+    if checking_id: plan_specs.append((checking_id, "생활비", 25, "매달 고정적으로 쓰는 생활비예요"))
+    if parking_id:  plan_specs.append((parking_id,  "비상금", 10, "급한 일에 대비해 비상금을 모아둬요"))
+    if saving_id:   plan_specs.append((saving_id,   "적금",   10, "목돈 마련을 위해 매달 자동으로 적립해요"))
+
+    plans = [
+        {
+            "asset_id": aid,
+            "account_purpose": purpose,
+            "amount": salary * ratio // 100,
+            "comment": comment,
+        }
+        for aid, purpose, ratio, comment in plan_specs
+    ]
 
     invest_ratio = 0
     if stock_id: invest_ratio += 15
     if irp_id:   invest_ratio += 10
     invest_amount = salary * invest_ratio // 100
 
-    print(f"  → salary_rebalance {len(plans)}건: {[(p['category'], p['asset_id']) for p in plans]}, invest={invest_amount}")
+    print(f"  → salary_rebalance {len(plans)}건: {[(p['account_purpose'], p['amount']) for p in plans]}, invest={invest_amount}")
 
     return {
         "invest_amount": invest_amount,
@@ -180,12 +191,47 @@ def _pick_gathering(by_type, candidates):
     return None
 
 
+# 상품 타입별 AI 코멘트 (mock) — portfolio[].comment → 백엔드 aiComment 로 매핑
+PRODUCT_COMMENTS = {
+    "DEPOSIT": "원금 보장으로 안전하게 굴리는 자산이에요",
+    "SAVING":  "매달 자동으로 모아 목돈을 만드는 습관 자산이에요",
+    "STOCK":   "장기 우상향에 투자하는 핵심 성장 자산이에요",
+    "BOND":    "주식 변동성을 낮춰주는 안정 자산이에요",
+    "IRP":     "세액공제 혜택까지 챙기는 노후 대비 자산이에요",
+}
+
+# 흐름(term)별 AI 수익률·코멘트 메타 (mock)
+TERM_META = {
+    "단기": {"expected_rr_pct": 3.5,  "investment_months": 6,
+            "account_comment": "급할 때 바로 꺼낼 수 있게 파킹 통장에 모아요",
+            "rr_comment": "안전 자산 위주라 변동 없이 또박또박 늘어나요"},
+    "중기": {"expected_rr_pct": 6.5,  "investment_months": 36,
+            "account_comment": "절세 혜택이 있는 ISA로 중기 목표를 키워요",
+            "rr_comment": "주식과 채권을 섞어 안정과 수익의 균형을 맞췄어요"},
+    "장기": {"expected_rr_pct": 9.0,  "investment_months": 120,
+            "account_comment": "IRP로 세액공제 받으며 노후를 길게 준비해요",
+            "rr_comment": "장기 복리 효과로 자산이 크게 불어나요"},
+}
+
+
+def _expected_amount(monthly, months, rr_pct):
+    """월 납입(monthly, 원)을 months 개월간 연 rr_pct% 복리 적립 시 예상 평가액(원)"""
+    mr = rr_pct / 100 / 12
+    if mr == 0:
+        return monthly * months
+    return round(monthly * (((1 + mr) ** months - 1) / mr))
+
+
 def _build_portfolio(products_by_type, type_ratio_pairs):
     chosen = []
     for ptype, ratio in type_ratio_pairs:
         lst = products_by_type.get(ptype) or []
         if lst:
-            chosen.append({"name": lst[0]["name"], "ratio": ratio})
+            chosen.append({
+                "name": lst[0]["name"],
+                "ratio": ratio,
+                "comment": PRODUCT_COMMENTS.get(ptype, "포트폴리오 균형을 위한 자산이에요"),
+            })
     if chosen:
         diff = 100 - sum(c["ratio"] for c in chosen)
         chosen[0]["ratio"] = chosen[0]["ratio"] + diff
@@ -279,6 +325,29 @@ async def asset_portfolio(req: Request):
         for c in candidates:
             c["weight"] = 60 if c["term"] == "단기" else 40
 
+    # 계좌 추천 흐름 — 보유 계좌가 아니라 'AI가 새 통장 개설을 추천'하는 케이스
+    #   gathering_id 없이 gathering_account 를 보내면 백엔드가 isRecommendation=true 로 저장
+    #   (gatheringAsset.id=null → 프론트의 '✨ 추천 계좌 (아직 미보유)' UI)
+    candidates.append({
+        "weight": 20,
+        "title": "추천! 고금리 적금 새 통장",
+        "term": "단기",
+        "summary": "지금 보유한 통장보다 금리가 높은 새 통장을 추천드려요",
+        "gathering": None,
+        "gathering_account": {
+            "name": "토스뱅크 자유적금",
+            "type": "SAVINGS",
+            "institution": "토스뱅크",
+            "interest_rate": 5.0,
+        },
+        "account_comment": "보유 통장보다 금리가 높아 같은 돈을 더 빠르게 불릴 수 있어요",
+        "funding": cash_pool[:1],
+        "portfolio_specs": [
+            [("SAVING", 100)],
+            [("DEPOSIT", 100)],
+        ],
+    })
+
     # 2단계: invest_amount 를 weight 비율로 분배 (합이 정확히 invest_amount 가 되도록)
     flows = []
     total_weight = sum(c["weight"] for c in candidates)
@@ -305,17 +374,30 @@ async def asset_portfolio(req: Request):
             if portfolio:
                 break
 
-        flows.append({
+        meta = TERM_META.get(c["term"], TERM_META["중기"])
+        gathering = c.get("gathering")
+
+        flow_out = {
             "title": c["title"],
             "term": c["term"],
             "summary": c["summary"],
             "funding_sources": funding_sources,
-            # 보유 계좌를 모으기 통장으로 연결 → 백엔드는 gathering_id(문자열)로 읽음.
-            # (gathering_account 는 '계좌 추천' 시 {name,type,institution,interest_rate} 객체용)
-            "gathering_id": c["gathering"]["asset_id"],
+            # 보유 계좌면 gathering_id(문자열), 계좌 추천이면 gathering_account 객체.
+            # 백엔드는 gathering_id 가 null 이면 gathering_account 로 isRecommendation=true 저장.
+            "gathering_id": gathering["asset_id"] if gathering else None,
             "amount": flow_amount,
+            # AI 생성 필드 — 백엔드가 그대로 portfolio_flows 에 저장 (null 방지)
+            "account_comment": c.get("account_comment") or meta["account_comment"],
+            "expected_rr_pct": meta["expected_rr_pct"],
+            "investment_months": meta["investment_months"],
+            "expected_amount": _expected_amount(
+                flow_amount, meta["investment_months"], meta["expected_rr_pct"]),
+            "rr_comment": meta["rr_comment"],
             "portfolio": portfolio or [],
-        })
+        }
+        if gathering is None:
+            flow_out["gathering_account"] = c["gathering_account"]
+        flows.append(flow_out)
 
     print(f"  → investment_flows {len(flows)}건 생성, 월납입 합 = {sum(f['amount'] for f in flows)} / invest_amount={invest_amount}")
     for f in flows:
