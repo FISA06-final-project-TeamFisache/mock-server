@@ -64,7 +64,7 @@ async def mini_challenge(req: Request):
         body.get("user_id"), body.get("stock_themes")))
     return _proposal(
         "커피 3잔만 마시기", "이번주 카페 지출을 줄여 절약 습관을 만들어봐요!",
-        "카페", "COFFEE", "COUNT", 3, 24000, "삼성전자",
+        "카페", "COFFEE", "COUNT", 3, 24000, "005930.KS",
     )
 
 
@@ -78,23 +78,52 @@ async def mini_challenge_adjust(req: Request):
     if "쉽게" in feedback:
         return _proposal(
             "커피 5잔까지 OK", "조금 여유있게! 이번주 커피 5잔 이내로 도전해요.",
-            "카페", "COFFEE", "COUNT", 5, 14000, "삼성전자",
+            "카페", "COFFEE", "COUNT", 5, 14000, "005930.KS",
         )
     if "어렵게" in feedback:
         return _proposal(
             "커피 2잔만 마시기", "독하게! 이번주 커피는 딱 2잔까지만.",
-            "카페", "COFFEE", "COUNT", 2, 35000, "삼성전자",
+            "카페", "COFFEE", "COUNT", 2, 35000, "005930.KS",
         )
     if "주제" in feedback:
         return _proposal(
             "배달 음식 2번만 시키기", "주제를 바꿔봤어요. 이번주 배달은 2번까지!",
-            "식비", "DELIVERY", "COUNT", 2, 48000, "카카오",
+            "식비", "DELIVERY", "COUNT", 2, 48000, "035720.KS",
         )
     # 그 외 피드백 → 기본 제안
     return _proposal(
         "커피 3잔만 마시기", "이번주 카페 지출을 줄여 절약 습관을 만들어봐요!",
-        "카페", "COFFEE", "COUNT", 3, 24000, "삼성전자",
+        "카페", "COFFEE", "COUNT", 3, 24000, "005930.KS",
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# POST /mini_challenge/nag  ← Spring ChallengeAgentService.nag
+#   body: {user_id, title, category, challenge_type(count|amount), target, current, progress_pct(50|80|90)}
+#   응답: ChallengeNagResponseDto { created_at, nag_message }
+#   (실제 ai-server nag_agent.py 의 달성률별 톤을 그대로 흉내 — 50/80/90%)
+# ──────────────────────────────────────────────────────────────
+# progress_pct → (잔소리 문구 템플릿). title/category 와 이모지를 자연스럽게 섞는다.
+_NAG_BY_PCT = {
+    50: "{title} 벌써 절반! {category} 지출이 반쯤 찼어요. 아직 갈 길 있으니 조금만 더 아껴봐요 ☕",
+    80: "{title} 거의 다 왔어요! {category}는 이제 거의 한도까지 왔으니 마지막까지 집중해봐요 🔥",
+    90: "{title} 눈앞이에요! {category} 한도가 코앞이니 여기서 포기하면 아까워요. 끝까지 가봐요 💪",
+}
+
+
+@app.post("/mini_challenge/nag")
+async def mini_challenge_nag(req: Request):
+    body = await req.json()
+    pct = body.get("progress_pct")
+    title = body.get("title") or "미니챌린지"
+    category = body.get("category") or "이번 챌린지"
+    print("\n[mock /mini_challenge/nag] user_id={} title={} pct={}".format(
+        body.get("user_id"), title, pct))
+    template = _NAG_BY_PCT.get(pct, "{title} 조금만 더 힘내요! {category} 절약 거의 다 왔어요 ✨")
+    return {
+        "created_at": datetime.now().isoformat(),
+        "nag_message": template.format(title=title, category=category),
+    }
 
 
 # ──────────────────────────────────────────────────────────────

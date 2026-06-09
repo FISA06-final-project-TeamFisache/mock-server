@@ -54,7 +54,7 @@ AgentService 용 mock FastAPI (`/portfolio/profile`, `/portfolio/rebalance`, `/a
 ```bash
 uvicorn mock_asset_portfolio:app --host 0.0.0.0 --port 8000 --reload
 ```
-
+<!-- docker exec wooriport-redis redis-cli HSET challenge:6f26ccc3-ae37-44a4-9b95-c298d9231f98 notifiedThreshold 0 currentValue 0 -->
 기본 Kafka 주소는 `localhost:9092` 입니다. 다른 주소로 보내려면 환경변수로 지정하세요.
 
 **Windows (PowerShell)**
