@@ -259,6 +259,37 @@ def scenario_challenge_success():
     print("      테스트용 '0 * * * * *'(매분) 로 바꿔두면 1분 내에 성공 알림이 생성돼요.")
 
 
+# ─── 대상 유저 선택 ─────────────────────────────────────
+def _list_users():
+    """DB의 모든 유저 (email, salary, 우리은행 급여통장 지정 여부)."""
+    return _query(
+        """SELECT u.email, u.salary, (u.auto_transfer_to_asset_id IS NOT NULL)
+             FROM users u
+            ORDER BY u.email""")
+
+
+def _pick_user():
+    """DB 유저 목록을 보여주고 대상 유저를 고르게 한다. 선택 시 전역 TEST_EMAIL 갱신."""
+    global TEST_EMAIL
+    rows = _list_users()
+    if not rows:
+        print("⚠️  DB에 유저가 없습니다.")
+        return
+    print("\n=== 대상 유저 선택 ===")
+    for i, (email, salary, has_acc) in enumerate(rows, 1):
+        cur = " ←현재" if email == TEST_EMAIL else ""
+        acc = "급여통장✅" if has_acc else "급여통장❌"
+        print(f"  {i}) {email}  (salary {int(salary or 0):,}, {acc}){cur}")
+    sel = input(f"유저 번호 (엔터=현재 '{TEST_EMAIL}' 유지): ").strip()
+    if not sel:
+        return
+    if sel.isdigit() and 1 <= int(sel) <= len(rows):
+        TEST_EMAIL = rows[int(sel) - 1][0]
+        print(f"→ 대상 유저: {TEST_EMAIL}\n")
+    else:
+        print("잘못된 입력 — 현재 유저 유지\n")
+
+
 # ─── 메뉴 ───────────────────────────────────────────────
 SCENARIOS = {
     "1": ("월급 변동 없음 (diff 0)",   lambda: scenario_salary(0)),
@@ -285,15 +316,20 @@ def main():
         run(arg)
         return
     print("=== 알림 시나리오 트리거 ===")
+    _pick_user()
     while True:
+        print(f"[대상 유저: {TEST_EMAIL}]")
         for k, (label, _) in SCENARIOS.items():
             print(f"  {k}) {label}")
+        print("  u) 대상 유저 변경")
         print("  0) 종료")
         sel = input("번호 선택 (0=종료): ").strip()
         if sel in ("0", "q", "quit", "exit"):
             print("종료합니다.")
             break
-        if sel in SCENARIOS:
+        if sel in ("u", "U"):
+            _pick_user()
+        elif sel in SCENARIOS:
             run(sel)
         else:
             print("잘못된 입력입니다. 다시 선택하세요.\n")
