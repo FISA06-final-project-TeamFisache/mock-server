@@ -26,9 +26,7 @@
 """
 import math
 import os
-import random
 import sys
-import time
 from datetime import datetime
 
 import psycopg2
@@ -37,9 +35,6 @@ import psycopg2
 from mock_payment import send_transaction
 
 TEST_EMAIL = os.getenv("TEST_EMAIL", "flowtest@wooriport.com")
-
-# 급여 변동(2·3번) 후 백엔드가 이체 계획을 생성할 때까지 대기할 시간(초)
-PLAN_WAIT_SEC = float(os.getenv("PLAN_WAIT_SEC", "3"))
 
 DB_CONF = {
     "host": os.getenv("DB_HOST", "localhost"),
@@ -79,67 +74,6 @@ def _salary_account():
     return row[0], int(row[1] or 0)
 
 
-# 급여 증감 시 Pori 분배 가이드(rebalance_comment)에 넣을 임의 문구
-POS_REBALANCE_COMMENTS = [
-    "월급이 {amt}원 늘어서 투자·저축 비중을 조금 더 키웠어요!",
-    "여유분 {amt}원을 모음·투자 통장에 나눠 담았어요.",
-    "늘어난 {amt}원만큼 목표 자금을 더 빠르게 모아봐요!",
-]
-NEG_REBALANCE_COMMENTS = [
-    "월급이 {amt}원 줄어서 일부 이체 금액을 낮췄어요.",
-    "{amt}원 감소분만큼 투자·저축을 잠시 줄였어요.",
-    "이번 달은 {amt}원 적게 들어와 분배를 조정했어요.",
-]
-
-
-def _user_id():
-    row = _query("SELECT id FROM users WHERE email = %s", (TEST_EMAIL,), fetch="one")
-    if not row:
-        raise RuntimeError(f"{TEST_EMAIL} 유저를 찾을 수 없습니다.")
-    return row[0]
-
-
-def _distribute_plan_deltas(user_id, diff):
-    """generateFromSalary 가 baseline 으로 만든 이번 달 미확정 이체 계획 일부에
-    증감분(diff)을 임의로 분배한다. → 월급 상세 화면에서 '바뀐 항목만 +/-' 가 보이게."""
-    now = datetime.now()
-    rows = _query(
-        """SELECT id, planned_amount FROM transfer_plans
-            WHERE user_id = %s AND year = %s AND month = %s
-              AND is_confirmed = false AND deleted_at IS NULL
-            ORDER BY created_at""",
-        (user_id, now.year, now.month))
-    if not rows:
-        print("  ⚠️  이번 달 미확정 이체 계획이 없어 증감분을 못 넣었어요 "
-              "(generateFromSalary 가 아직 안 돌았거나 포트폴리오 미설정).")
-        return
-    # 임의로 일부 계획에만 분배(나머지는 그대로) → '바뀐 항목만 +' UI 가 드러나게
-    k = random.randint(1, len(rows))
-    targets = random.sample(rows, k)
-    base = diff // k
-    deltas = [base] * k
-    deltas[-1] += diff - base * k        # 나머지 보정 → 합계 = diff
-    applied = []
-    for (plan_id, planned), d in zip(targets, deltas):
-        new_amount = max(0, int(planned) + int(d))
-        _query("UPDATE transfer_plans SET planned_amount = %s WHERE id = %s",
-               (new_amount, plan_id), fetch="none")
-        applied.append(new_amount - int(planned))   # 0 클램프 반영된 실제 변동
-    print(f"  → 이체 계획 {len(rows)}건 중 {k}건에 증감분 분배: "
-          f"{', '.join(f'{a:+,}' for a in applied)} (합계 {sum(applied):+,}원)")
-
-    # Pori 분배 가이드 문구(rebalance_comment) 임의 설정 — getTransferPlans 는 plans.get(0)
-    # 의 값을 읽으므로, 이번 달 미확정 plans 전체에 동일 문구를 넣어 어느 행이 첫 행이든 잡히게 함
-    pool = POS_REBALANCE_COMMENTS if diff > 0 else NEG_REBALANCE_COMMENTS
-    comment = random.choice(pool).format(amt=f"{abs(diff):,}")
-    _query(
-        """UPDATE transfer_plans SET rebalance_comment = %s
-            WHERE user_id = %s AND year = %s AND month = %s
-              AND is_confirmed = false AND deleted_at IS NULL""",
-        (comment, user_id, now.year, now.month), fetch="none")
-    print(f"  → rebalance_comment 설정: \"{comment}\"")
-
-
 def scenario_salary(diff):
     acc, base = _salary_account()
     amount = base + diff
@@ -155,12 +89,7 @@ def scenario_salary(diff):
     }
     send_transaction(data)
     print(f"  user.salary(기준)={base:,} / 보낸 급여={int(amount):,} / 예상 diff={int(amount) - base:+,}")
-
-    # 변동(2·3번)일 때만: 백엔드가 baseline 계획을 만든 뒤 증감분을 임의 분배
-    if diff != 0:
-        print(f"  ⏳ 백엔드 이체 계획 생성 대기 {PLAN_WAIT_SEC}s ...")
-        time.sleep(PLAN_WAIT_SEC)
-        _distribute_plan_deltas(_user_id(), diff)
+    # 이후 이체 계획 금액·안내 문구(rebalance_comment)는 백엔드 AI 리밸런싱이 생성한다.
 
 
 # ─── 챌린지 시나리오 ─────────────────────────────────────
